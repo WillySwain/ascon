@@ -1,26 +1,27 @@
-K = '00000000000000010000001000000011000001000000010100000110000001110000100000001001000010100000101100001100000011010000111000001111'#key 128 bits
-N = '00000000000000010000001000000011000001000000010100000110000001110000100000001001000010100000101100001100000011010000111000001111' #nonce 128 bits
-A = '00000000000000010000001000000011000001000000010100000110000001110000100000001001000010100000101100001100000011010000111000001111'
-P = '00000000000000010000001000000011000001000000010100000110000001110000100000001001000010100000101100001100000011010000111000001111'
-T = '' #tag 128 bits
+from sage.all import Integer
 round_constants = [0xf0,0xe1,0xd2,0xc3,0xb4,0xa5,0x96,0x87,0x78,0x69,0x5a,0x4b]
 rate = 128 #128 bits
 IV = 9259414062373011456
 P8 = 4
 P12 = 0
 
+#rotates number x by n bits to the right
 def rotate_right(x, n):
     mask = (1 << 64) - 1 
     return ((x >> n) | (x << (64 - n))) & mask
 
+#bitwise not for 64 bit numbers, Sage not operator (~) does not work as Python's does
 def bitwise_not(x):
     return 0b1111111111111111111111111111111111111111111111111111111111111111-x
 
+#clears out n bits in number x
 def clear_bits(x, n):
     if n == 0:
         return x
     return x & ~((1 << n) - 1)
 
+#recursive permutation function for ascon P12 rounds recurse through entire round_constants array
+#while P8 rounds recurse from 0xb4 constant to 0x4b
 def permute(S,round_const_index):
     if round_const_index >= len(round_constants):
         return S
@@ -49,7 +50,11 @@ def permute(S,round_const_index):
     
     return permute(S,round_const_index+1)
 
+#Authenticated encryption function for ascon128a
+#takes key, nonce, associated data, and plaintext
+#outputs cipher text C concatenated with tag T 
 def auth_encrypt(K,N,A,P):
+    #Initilization
     C = ''
     S = [0]*5
     K0=int(K[:64],2)
@@ -65,6 +70,7 @@ def auth_encrypt(K,N,A,P):
     S[3]^^=K0
     S[4]^^=K1
     #print(bin(S[0]),bin(S[1]),bin(S[2]),bin(S[3]),bin(S[4]))
+    #processing associated data
     A_length = len(A)
     if A_length > 0:
         while A_length >= rate:
@@ -84,6 +90,7 @@ def auth_encrypt(K,N,A,P):
             S[0] ^^= ((0x80) << (56 - 8 * (A_length)))
         S=permute(S,P8)
     S[4]^^=1
+    #processing plaintext
     P_length = len(P)
     while P_length >= rate:
         S[0] ^^= int(P[:64],2)
@@ -106,6 +113,7 @@ def auth_encrypt(K,N,A,P):
             S[0]^^=int(P,2)
         C+=bin(S[0])[2:].zfill(64)[:P_length]
         S[0] ^^= ((0x80) << (56 - 8 * (P_length)))
+    #finalization
     S[2] ^^= K0
     S[3] ^^= K1
     S=permute(S,P12)
@@ -115,13 +123,11 @@ def auth_encrypt(K,N,A,P):
     C+=bin(S[4])[2:].zfill(64)[:64]
     return C
 
-CT = auth_encrypt(K,N,A,P)
-T = CT[-128:]
-C = CT[:-128]
-print("C is ", C)
-print("T is ", T)
-
+#Verified decryption function for ascon128a
+#takes key, nonce, associated data, ciphertext, and tag
+#outputs plaintext if tags verify, raises error if they do not
 def ver_decryption(K, N, A, C, T):
+    #initilization
     P=''
     C_length = len(C)  #ABYTES (in bits)
     S = [0]*5
@@ -137,6 +143,7 @@ def ver_decryption(K, N, A, C, T):
     S=permute(S,P12)
     S[3]^^=K0
     S[4]^^=K1
+    #processing associated data
     A_length = len(A)
     if A_length > 0:
         while A_length >= rate:
@@ -157,6 +164,7 @@ def ver_decryption(K, N, A, C, T):
         S=permute(S,P8)
     S[4]^^=1
    # print(bin(S[0]),bin(S[1]),bin(S[2]),bin(S[3]),bin(S[4]))
+    #processing ciphertext
     while C_length >= rate:
         C0 = int(C[:64],2)
         C1 = int(C[64:128],2) 
@@ -184,6 +192,7 @@ def ver_decryption(K, N, A, C, T):
         S[0] = clear_bits(S[0],C_length)        
         S[0] |= C0
         S[0] ^^= ((0x80) << (56 - (C_length)))  
+    #finalization
     S[2] ^^= K0
     S[3] ^^= K1
     S = permute(S,P12)
@@ -193,9 +202,8 @@ def ver_decryption(K, N, A, C, T):
     T_prime+=bin(S[3])[2:].zfill(64)[:64]
     T_prime+=bin(S[4])[2:].zfill(64)[:64]
     if T_prime != T:
-        raise ValueError("T and T* are not equal.")
+        return -1
     return P[:len(C)]
 
-print(ver_decryption(K,N,A,C,T))
 
 
