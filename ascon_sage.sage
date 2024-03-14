@@ -4,26 +4,18 @@ N = '000000000000000100000010000000110000010000000101000001100000011100001000000
 round_constants = [0xf0,0xe1,0xd2,0xc3,0xb4,0xa5,0x96,0x87,0x78,0x69,0x5a,0x4b]
 A = '00000000000000010000001000000011000001000000010100000110000001110000100000001001000010100000101100001100000011010000111000001111'
 P = '00000000000000010000001000000011000001000000010100000110000001110000100000001001000010100000101100001100000011010000111000001111'
-#associated data arbitrary length
-# P = #plain text
-# T = #tag 128 bits
-# D = #data block 128 bits
-# pa = #a rounds 12
-# pb = #b rounds 8
+T = ''#tag 128 bits
 rate = 128 #128 bits
-# capacity = 320 - rate #192
-# S[5] = []# state 320 bits|
 IV = 9259414062373011456
 P8 = 4
 P12 = 0
-
 def rotate_right(x, n):
     mask = (1 << 64) - 1 
     return ((x >> n) | (x << (64 - n))) & mask
 
+
 def bitwise_not(x):
     return 0b1111111111111111111111111111111111111111111111111111111111111111-x
-
 def permute(S,round_const_index):
     if round_const_index >= len(round_constants):
         return S
@@ -50,8 +42,8 @@ def permute(S,round_const_index):
     S[3] = T[3]^^ rotate_right(T[3],10) ^^ rotate_right(T[3],17)
     S[4] = T[4]^^ rotate_right(T[4],7) ^^ rotate_right(T[4],41)
     
+    
     return permute(S,round_const_index+1)
-
 def auth_encrypt(K,N,A,P):
     C = ''
     S = [0]*5
@@ -85,8 +77,8 @@ def auth_encrypt(K,N,A,P):
             if A:
                 S[0] ^^= int(A,2) #in case if A=''
             S[0] ^^= ((0x80) << (56 - 8 * (A_length)))
-        S=permute(S,4)
-        S[4]^^=1
+        S=permute(S,P8)
+    S[4]^^=1
     P_length = len(P)
     while P_length >= rate:
         S[0] ^^= int(P[:64],2)
@@ -118,4 +110,78 @@ def auth_encrypt(K,N,A,P):
     C+=bin(S[4])[2:].zfill(64)[:64]
     return C
 
-auth_encrypt(K,N,A,P)
+CT = auth_encrypt(K,N,A,P)
+T = CT[-128:]
+C = CT[:-128]
+print("C is ", C)
+print("T is ", T)
+
+def ver_decryption(K, N, A, C, T):
+    P=''
+    C_length = len(C) - 128  #ABYTES (in bits)
+    S = [0]*5
+    K0=int(K[:64],2)
+    K1=int(K[64:128],2)
+    N0=int(N[:64],2)
+    N1=int(N[64:128],2)
+    S[0] = IV
+    S[1] = K0
+    S[2] = K1    
+    S[3] = N0
+    S[4] = N1
+    S=permute(S,P12)
+    S[3]^^=K0
+    S[4]^^=K1
+    A_length = len(A)
+    if A_length > 0:
+        while A_length >= rate:
+            S[0]^^=int(A[:64],2)
+            S[1]^^=int(A[64:128],2) 
+            
+            S = permute(S,P8)
+            A=A[rate:]
+            A_length-=rate
+        if A_length >= 64:
+            S[0] ^^= int(A[:64],2)
+            S[1] ^^= int(A[64:128],2)
+            S[1] ^^= ((0x80) << (56 - 8 * (A_length-8)))
+        else:
+            if A:
+                S[0] ^^= int(A,2) #in case if A=''
+            S[0] ^^= ((0x80) << (56 - 8 * (A_length)))
+        S=permute(S,P8)
+    S[4]^^=1
+    while C_length >= rate:
+        C0 = int(C[:64],2)
+        C1 = int(C[64:128],2) 
+        P+=bin(S[0]^^C0)[2:].zfill(64)
+        P+=bin(S[1]^^C1)[2:].zfill(64)
+        S=permute(S,P8)
+        C = C[rate:]
+        C_length-=rate
+    if C_length >= 64:
+        C0 = int(C[:64],2)
+        C1 = int(C[64:C_length],2) #might use in encrypt
+        P+=bin(S[0]^^C0)[2:].zfill(64)
+        P+=bin(S[1]^^C1)[2:].zfill(C_length-64)
+        S[0] = C0
+        S[1] = c1
+        S[1] ^^= ((0x80) << (56 - 8 * (C_length-8)))
+    else:
+        C0 = int(C[C_length],2)
+        P+=bin(S[0]^^C0)[2:].zfill(64)
+        S[0] = C0
+        S[0] ^^= ((0x80) << (56 - 8 * (C_length)))
+    S[2] ^^= K0
+    S[3] ^^= K1
+    S = permute(S,P12)
+    S[3] ^^= K0
+    S[4] ^^= K1
+    T_prime=''
+    T_prime+=bin(S[3])[2:].zfill(64)[:64]
+    T_prime+=bin(S[4])[2:].zfill(64)[:64]
+    return P
+
+print(ver_decryption(K,N,A,CT,T))
+
+
