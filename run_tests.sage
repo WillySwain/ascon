@@ -24,7 +24,7 @@ def generate_test():
     N = generate_random_bits(128)
     A = generate_random_bits(128)
     
-    P_length = random.randint(1, 256)
+    P_length = random.randint(1, 1056)
     P = generate_random_bits(P_length)
     
     test_name = f"{P_length}_bit_P"
